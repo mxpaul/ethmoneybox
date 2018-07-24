@@ -28,9 +28,9 @@ contract('MoneyBox', function(accounts) {
 		this.inst = await MoneyBox.new({from: acc.owner});
 	});
 
-	it('should have zero balance for any non-existing account', function() {
-		this.inst.myBalance({from: acc.owner}).should.eventually.be.bignumber.equal(0);
-		this.inst.myBalance({from: acc.anyone}).should.eventually.be.bignumber.equal(0);
+	it('should have zero balance for any non-existing account', async function() {
+		await this.inst.myBalance({from: acc.owner}).should.eventually.be.bignumber.equal(0);
+		await this.inst.myBalance({from: acc.anyone}).should.eventually.be.bignumber.equal(0);
 	});
 
 	it('should refuse to accept money in myBalance, etc', async function() {
@@ -38,10 +38,10 @@ contract('MoneyBox', function(accounts) {
 		await expectThrow(this.inst.myBalance({from: acc.anyone, value: someEther}));
 	});
 
-	it('should allow set Goal sum and read own Goal', function() {
+	it('should allow set Goal sum and read own Goal', async function() {
 		const sumToReach = web3.toWei('100', 'finney');
-		this.inst.setGoal(sumToReach, {from: acc.anyone}).should.eventually.be.fulfilled;
-		this.inst.myGoal({from: acc.anyone}).should.eventually.be.bignumber.equal(sumToReach);
+		await this.inst.setGoal(sumToReach, {from: acc.anyone}).should.eventually.be.fulfilled;
+		await this.inst.myGoal({from: acc.anyone}).should.eventually.be.bignumber.equal(sumToReach);
 	});
 
 	it('should only allow to increase goal amount after it was set, but not to decrease it', async function() {
