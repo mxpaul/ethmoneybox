@@ -36,6 +36,7 @@
     "truffle": "^4.1.8"
   },
   "dependencies": {
-    "growl": "^1.10.5"
+    "growl": "^1.10.5",
+    "openzeppelin-solidity": "1.10.0"
   }
 }
