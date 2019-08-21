@@ -1,26 +1,30 @@
 'use strict';
 
-import expectThrow from '../node_modules/openzeppelin-solidity/test/helpers/expectThrow';
-import expectEvent from '../node_modules/openzeppelin-solidity/test/helpers/expectEvent';
+let expectThrow = async (promise) => {
+    try {
+      await promise;
+    } catch (error) {
+      const invalidOpcode = error.message.search('invalid opcode') >= 0;
+      const outOfGas = error.message.search('out of gas') >= 0;
+      const revert = error.message.search('revert') >= 0;
+      assert(
+        invalidOpcode || outOfGas || revert,
+        "Expected throw, got '" + error + "' instead",
+      );
+      return;
+    }
+    assert.fail('Expected throw not received');
+};
 
-const BigNumber = web3.BigNumber;
-const chai =require('chai');
-chai.use(require('chai-bignumber')(BigNumber));
+const BN = web3.utils.BN;
+const chai = require('chai');
+const truffleAssert = require('truffle-assertions');
+
+chai.use(require('chai-bignumber')(BN));
 chai.use(require('chai-as-promised')); // Order is important
 chai.should();
 
 const MoneyBox = artifacts.require("MoneyBox");
-
-async function assertBalanceDiff(callInfo, wantEtherDiff) {
-	const etherBefore = web3.eth.getBalance(callInfo.address);
-
-	const ret = await callInfo.func(...callInfo.args, {from: callInfo.address, gasPrice: callInfo.gasPrice});
-	const gasUsed = new BigNumber(ret.receipt.gasUsed);
-
-	const etherAfter = web3.eth.getBalance(callInfo.address);
-	const etherUsed = gasUsed.mul(callInfo.gasPrice);
-	etherAfter.sub(etherBefore).add(etherUsed).should.be.bignumber.equal(wantEtherDiff);
-}
 
 contract('MoneyBox', function(accounts) {
 	const acc = {anyone: accounts[0], owner: accounts[1], anyoneElse: accounts[2]};
@@ -29,70 +33,71 @@ contract('MoneyBox', function(accounts) {
 	});
 
 	it('should have zero balance for any non-existing account', async function() {
-		await this.inst.myBalance({from: acc.owner}).should.eventually.be.bignumber.equal(0);
-		await this.inst.myBalance({from: acc.anyone}).should.eventually.be.bignumber.equal(0);
+		let bal = await this.inst.myBalance({from: acc.owner});
+		assert.equal(bal.valueOf(), 0);
 	});
 
 	it('should refuse to accept money in myBalance, etc', async function() {
-		const someEther = web3.toWei('10', 'finney')
+		const someEther = web3.utils.toWei('10', 'finney')
 		await expectThrow(this.inst.myBalance({from: acc.anyone, value: someEther}));
 	});
 
 	it('should allow set Goal sum and read own Goal', async function() {
-		const sumToReach = web3.toWei('100', 'finney');
-		await this.inst.setGoal(sumToReach, {from: acc.anyone}).should.eventually.be.fulfilled;
-		await this.inst.myGoal({from: acc.anyone}).should.eventually.be.bignumber.equal(sumToReach);
+		const sumToReach = web3.utils.toWei('100', 'finney');
+		await this.inst.setGoal(sumToReach, {from: acc.anyone});
+		let res = await this.inst.myGoal({from: acc.anyone});
+		assert.equal(res, sumToReach);
 	});
 
 	it('should only allow to increase goal amount after it was set, but not to decrease it', async function() {
-		const sumToReach = web3.toWei('100', 'finney');
+		const sumToReach = web3.utils.toWei('100', 'finney');
 		await this.inst.setGoal(sumToReach, {from: acc.anyone});
 		await this.inst.setGoal(sumToReach, {from: acc.anyone}).should.be.rejected;
 		await expectThrow(this.inst.setGoal(sumToReach, {from: acc.anyone}));
 
-		const largerSumToReach = sumToReach + web3.toWei('1', 'finney');
+		const largerSumToReach = sumToReach + web3.utils.toWei('1', 'finney');
 		await this.inst.setGoal(largerSumToReach, {from: acc.anyone});
 
 		const updatedGoal = await this.inst.myGoal({from: acc.anyone});
-		updatedGoal.should.be.bignumber.equal(largerSumToReach);
+		assert.equal(updatedGoal, largerSumToReach)
 	});
 
 	it('should refuse to accept money for non-existing account', async function() {
-		const someEther = web3.toWei('10', 'finney');
+		const someEther = web3.utils.toWei('10', 'finney');
 		await expectThrow(this.inst.addMoney({from: acc.anyone, value: someEther}));
 	});
 
 	it('should accept money if goal is set but not reached', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
-		const paymentAmount = web3.toWei('10', 'finney');
+		const paymentAmount = web3.utils.toWei('10', 'finney');
 		await this.inst.addMoney({from: acc.anyone, value: paymentAmount});
 
-		const contractBalance = web3.eth.getBalance(this.inst.address)
-		contractBalance.should.be.bignumber.equal(paymentAmount);
+		const contractBalance = await web3.eth.getBalance(this.inst.address)
+		assert.equal(contractBalance, paymentAmount);
 
 		const balance = await this.inst.myBalance({from: acc.anyone});
-		balance.should.be.bignumber.equal(paymentAmount);
+		assert.equal(balance, paymentAmount);
 	});
 
 	it('should increase account balance after few payments', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
-		const paymentAmount = web3.toWei('10', 'finney');
+		const paymentAmount = web3.utils.toWei('10', 'finney');
 		await this.inst.addMoney({from: acc.anyone, value: paymentAmount});
 		await this.inst.addMoney({from: acc.anyone, value: paymentAmount});
 		await this.inst.addMoney({from: acc.anyone, value: paymentAmount});
 
 		const balance = await this.inst.myBalance({from: acc.anyone});
-		const expectedBalance = web3.toWei('30', 'finney');
-		balance.should.be.bignumber.equal(expectedBalance);
+		const expectedBalance = web3.utils.toWei('30', 'finney');
+		assert.equal(balance, expectedBalance);
 	});
 
 	it('should refuse to accept money after goal has been reached', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
 		await this.inst.addMoney({from: acc.anyone, value: goalAmount});
-		const smallAmount = web3.toWei('1', 'wei');
+		const smallAmount = web3.utils.toWei('1', 'wei');
 		await expectThrow(this.inst.addMoney({from: acc.anyone, value: smallAmount}));
 	});
 
@@ -101,85 +106,69 @@ contract('MoneyBox', function(accounts) {
 	});
 
 	it('should refuse to withdraw if account has no money', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
 
 		await expectThrow(this.inst.withdraw({from: acc.anyone}));
 	});
 
 	it('should refuse to withdraw unless goal is reached', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
-		const someEther = web3.toWei('10', 'finney')
+		const someEther = web3.utils.toWei('10', 'finney')
 		await this.inst.addMoney({from: acc.anyone, value: someEther});
 
 		await expectThrow(this.inst.withdraw({from: acc.anyone}));
 	});
 
 	it('should let withdraw if goal is reached', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
-		const goalAndSomeMoreAmount = web3.toWei('1001', 'finney')
+		const goalAndSomeMoreAmount = web3.utils.toWei('1001', 'finney')
 		await this.inst.addMoney({from: acc.anyone, value: goalAndSomeMoreAmount});
 
 		await this.inst.withdraw({from: acc.anyone});
-		const contractBalance = web3.eth.getBalance(this.inst.address)
-		contractBalance.should.be.bignumber.zero;
+		const contractBalance = web3.eth.getBalance(this.inst.address);
 
 		const balanceAfterWithdrawal = await this.inst.myBalance({from: acc.anyone});
-		balanceAfterWithdrawal.should.be.bignumber.zero;
+		assert.equal(balanceAfterWithdrawal, 0, "balance AfterWithdrawal is not equal to 0");
 
 		const goalAfterWithdrawal = await this.inst.myGoal({from: acc.anyone})
-		goalAfterWithdrawal.should.be.bignumber.zero;
+		assert.equal(goalAfterWithdrawal, 0, "goal AfterWithdrawal is not equal to 0");
 	});
 
 	it('should emit event when set a goal', async function() {
-		const sumToReach = web3.toWei('100', 'finney');
-		const trans = await this.inst.setGoal(sumToReach, {from: acc.anyone});
-		const Event = await expectEvent.inTransaction(trans, "GoalSet");
-		Event.should.have.deep.property('args', {amount: new BigNumber(sumToReach), account: acc.anyone});
+		const sumToReach = web3.utils.toWei('100', 'finney');
+		const trans = await this.inst.setGoal(sumToReach, ({from: acc.anyone}));
+		truffleAssert.eventEmitted(trans, 'GoalSet', (ev) => { 
+			return ev.account === acc.anyone && ev.amount.eq(new BN(sumToReach)); 
+		});
+		
 	});
 
 	it('should emit event when money added to the box', async function() {
-		const sumToReach = web3.toWei('100', 'finney');
+		const sumToReach = web3.utils.toWei('100', 'finney');
 		await this.inst.setGoal(sumToReach, {from: acc.anyone});
 
-		const someEther = web3.toWei('10', 'finney')
+		const someEther = web3.utils.toWei('10', 'finney')
 		const trans = await this.inst.addMoney({from: acc.anyone, value: someEther});
-		const Event = await expectEvent.inTransaction(trans, "MoneyAdded");
-		Event.should.have.nested.bignumber.property('args.amount').equal(someEther);
-		Event.should.have.nested.bignumber.property('args.deposit').equal(someEther);
-		Event.should.have.nested.property('args.account').equal(acc.anyone);
+		truffleAssert.eventEmitted(trans, 'MoneyAdded', (ev) => { 
+			return ev.account === acc.anyone 
+					&& ev.amount.eq(new BN(someEther))
+					&& ev.deposit.eq(new BN(someEther)); 
+		});
 	});
 
 	it('should emit event when money added to the box', async function() {
-		const goalAmount = web3.toWei('1000', 'finney');
+		const goalAmount = web3.utils.toWei('1000', 'finney');
 		await this.inst.setGoal(goalAmount, {from: acc.anyone});
-		const goalAndSomeMoreAmount = web3.toWei('1001', 'finney')
+		const goalAndSomeMoreAmount = web3.utils.toWei('1001', 'finney')
 		await this.inst.addMoney({from: acc.anyone, value: goalAndSomeMoreAmount});
 
 		const trans = await this.inst.withdraw({from: acc.anyone});
-
-		const Event = await expectEvent.inTransaction(trans, "MoneyTaken");
-		Event.should.have.nested.bignumber.property('args.amount').equal(goalAndSomeMoreAmount);
-		Event.should.have.nested.property('args.account').equal(acc.anyone);
+		truffleAssert.eventEmitted(trans, 'MoneyTaken', (ev) => {
+			return ev.account === acc.anyone && ev.amount.eq(new BN(goalAndSomeMoreAmount));
+		});
 	});
-
-	it('should return correct sums for multiple users', async function() {
-		const gasPrice = 10;
-		const goal1 = web3.toWei('1000', 'finney');
-		const goal2 = web3.toWei('100', 'finney');
-		await this.inst.setGoal(goal1, {from: acc.anyone});
-		await this.inst.setGoal(goal2, {from: acc.anyoneElse});
-		await this.inst.addMoney({from: acc.anyone, value: goal1});
-		await this.inst.addMoney({from: acc.anyoneElse, value: goal2});
-
-		const withdrawAnyoneElse = {func: this.inst.withdraw, args: [], address: acc.anyoneElse, gasPrice};
-		await assertBalanceDiff(withdrawAnyoneElse, goal2)
-
-		const withdrawAnyone = {func: this.inst.withdraw, args: [], address: acc.anyone, gasPrice};
-		await assertBalanceDiff(withdrawAnyone, goal1)
-	});
-
 });
 
